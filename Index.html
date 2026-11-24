@@ -1,27 +1,51 @@
 <!doctype html>
-<html lang="en">
-  <head><meta charset="utf-8"><title>EZ-Ensemble</title></head>
-  <body>
-    <main>
-      <h1>EZ-Ensemble</h1>
-      <button id="check" type="button">Check connection</button>
-      <p id="result" role="status"></p>
-    </main>
-    <script>
-      const button = document.getElementById("check");
-      const result = document.getElementById("result");
-      function show(message) {
-        result.textContent = message;
-        button.disabled = false;
-      }
-      button.addEventListener("click", () => {
-        button.disabled = true;
-        result.textContent = "Reading the sheet…";
-        google.script.run
-          .withSuccessHandler(show)
-          .withFailureHandler(error => show(error.message))
-          .getDemoMessage();
-      });
-    </script>
-  </body>
-</html>
+<html lang="en"><head><meta charset="utf-8"><base target="_top"><title>EZ-Ensemble</title>
+<style>
+.account { text-align: right; }
+main { min-height: 80vh; display: grid; place-items: center; text-align: center; }
+table { margin: 1em auto; }
+input { width: min(5em, 15vw); }
+button + button { margin-left: .4em; }
+</style></head><body><div id="root"></div>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script>
+const h=React.createElement, labels=['Instrument','Tone','Pitch','Rhythm'];
+function call(name,...args){
+  return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[name](...args));
+}
+function App(){
+  const [user,setUser]=React.useState(null), [scores,setScores]=React.useState(['','','']);
+  const [rows,setRows]=React.useState([]), [status,setStatus]=React.useState(''), [busy,setBusy]=React.useState(false);
+  const [url,setUrl]=React.useState('');
+  React.useEffect(()=>{call('currentScorer').then(setUser).catch(e=>setStatus(e.message));},[]);
+  async function act(task){
+    setBusy(true);setStatus('');
+    try{await task();}catch(e){setStatus(e.message);}finally{setBusy(false);}
+  }
+  const disabled=!user||busy;
+  function update(){
+    if(scores.some(x=>x.trim()===''||!Number.isFinite(Number(x)))){setStatus('Enter a number for each score.');return;}
+    act(async()=>{await call('updateScores',scores.map(Number));setRows([]);setStatus('Saved to the Audition Scores tab.');});
+  }
+  return h(React.Fragment,null,
+    user && h('p',{className:'account'},user.name,' (',user.email,')'),
+    h('main',null,h('section',null,h('h1',null,'Audition scoring'),
+      !user&&(url?h('a',{href:url,target:'_top'},'Continue to Microsoft'):h('button',{disabled:busy,onClick:()=>act(async()=>setUrl(await call('startSignIn')))},'Sign in with Microsoft')),
+      h('table',null,h('thead',null,h('tr',null,labels.map(x=>h('th',{key:x,scope:'col'},x)))),
+      h('tbody',null,h('tr',null,h('th',{scope:'row'},'Flute'),scores.map((x,i)=>h('td',{key:i},h('input',{type:'number',step:'any','aria-label':labels[i+1],value:x,disabled,onChange:e=>setScores(scores.map((v,j)=>i===j?e.target.value:v))})))))),
+      h('button',{disabled,onClick:update},'Update Spreadsheet'),
+      h('button',{disabled,onClick:()=>act(async()=>{const data=await call('retrieveScores');setRows(data);setStatus(data.length?'Current spreadsheet data':'No scores saved yet.');})},'Retrieve Spreadsheet Information'),
+      h('p',{role:'status'},status),rows.length>0&&h('table',{'aria-label':'Current spreadsheet data'},h('tbody',null,rows.map((row,i)=>h('tr',{key:i},row.map((v,j)=>h(i?'td':'th',{key:j},v)))))))));
+}
+const root = ReactDOM.createRoot(document.getElementById('root'));
+if (window.google?.script?.run) {
+  root.render(h(App));
+} else {
+  root.render(h('main', null, h('section', null,
+    h('h1', null, 'Audition scoring'),
+    h('p', null, 'Sign-in and spreadsheet updates run in the hosted app.'),
+    h('a', {href: 'https://script.google.com/macros/s/AKfycbxQqzQhhDTYwFN8HAExT7jS7oQfUZTrB_O7DIUeIcsmz8ZZQMUVeI3DB87MWFUqfzl6Ig/exec'}, 'Open EZ-Ensemble')
+  )));
+}
+</script></body></html>
