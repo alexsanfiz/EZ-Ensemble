@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>EZ-Ensemble</title></head>
+  <body>
+    <main>
+      <h1>EZ-Ensemble</h1>
+      <button id="check" type="button">Check connection</button>
+      <p id="result" role="status"></p>
+    </main>
+    <script>
+      const button = document.getElementById("check");
+      const result = document.getElementById("result");
+      function show(message) {
+        result.textContent = message;
+        button.disabled = false;
+      }
+      button.addEventListener("click", () => {
+        button.disabled = true;
+        result.textContent = "Reading the sheet…";
+        google.script.run
+          .withSuccessHandler(show)
+          .withFailureHandler(error => show(error.message))
+          .getDemoMessage();
+      });
+    </script>
+  </body>
+</html>
