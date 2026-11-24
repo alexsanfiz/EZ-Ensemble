@@ -18,8 +18,23 @@ let sessionKey = document.getElementById('root').dataset.session;
 function App(){
   const [user,setUser]=React.useState(null), [scores,setScores]=React.useState(['','','']);
   const [rows,setRows]=React.useState([]), [status,setStatus]=React.useState(document.getElementById('root').dataset.error), [busy,setBusy]=React.useState(false);
+  const [role,setRole]=React.useState('');
+  const [total,setTotal]=React.useState(undefined);
   const [url,setUrl]=React.useState('');
   React.useEffect(()=>{if(sessionKey) call('currentScorer',sessionKey).then(setUser).catch(e=>setStatus(e.message));},[]);
+  React.useEffect(()=>{
+    if (user?.role !== 'student') return;
+    let active = true;
+    call('retrieveTotal',sessionKey).then(value => { if (active) setTotal(value); })
+      .catch(error => { if (active) setStatus(error.message); });
+    return () => { active = false; };
+  },[user]);
+  async function signOut(){
+    await call('logout',sessionKey);
+    sessionKey='';
+    setUser(null); setRole(''); setUrl(''); setTotal(undefined);
+    setScores(['','','']); setRows([]); setStatus('Logged out.');
+  }
   async function act(task){
     setBusy(true);setStatus('');
     try{await task();}catch(e){setStatus(e.message);}finally{setBusy(false);}
@@ -30,13 +45,17 @@ function App(){
     act(async()=>{await call('updateScores',sessionKey,scores.map(Number));setRows([]);setStatus('Saved to the Audition Scores tab.');});
   }
   return h(React.Fragment,null,
-    user && h('p',{className:'account'},user.name,' (',user.email,')'),
+    user && h('p',{className:'account'},user.name,' (',user.email,') ',h('button',{disabled:busy,onClick:()=>act(signOut)},'Log out')),
     h('main',null,h('section',null,h('h1',null,'Audition scoring'),
-      !user&&(url?h('a',{href:url,target:'_top'},'Continue to Microsoft'):h('button',{disabled:busy,onClick:()=>act(async()=>setUrl(await call('startSignIn')))},'Sign in with Microsoft')),
-      h('table',null,h('thead',null,h('tr',null,labels.map(x=>h('th',{key:x,scope:'col'},x)))),
+      !user&&!url&&h('label',null,'Sign in as ', h('select',{value:role,disabled:busy,onChange:e=>setRole(e.target.value)},
+        h('option',{value:''},'Choose a role'),h('option',{value:'student'},'Student'),h('option',{value:'teacher'},'Teacher'))),
+      !user&&(url?h('a',{href:url,target:'_top'},'Continue to Microsoft'):h('button',{disabled:busy||!role,onClick:()=>act(async()=>setUrl(await call('startSignIn',role)))},'Sign in with Microsoft')),
+      user?.role==='student'&&h('p',null,total===undefined?'Loading Flute total…':total===null?'No complete Flute score yet.':'Flute total: '+total),
+      user?.role==='student'&&h('button',{disabled:busy,onClick:()=>act(async()=>setTotal(await call('retrieveTotal',sessionKey)))},'Refresh total'),
+      user?.role==='teacher'&&h('table',null,h('thead',null,h('tr',null,labels.map(x=>h('th',{key:x,scope:'col'},x)))),
       h('tbody',null,h('tr',null,h('th',{scope:'row'},'Flute'),scores.map((x,i)=>h('td',{key:i},h('input',{type:'number',step:'any','aria-label':labels[i+1],value:x,disabled,onChange:e=>setScores(scores.map((v,j)=>i===j?e.target.value:v))})))))),
-      h('button',{disabled,onClick:update},'Update Spreadsheet'),
-      h('button',{disabled,onClick:()=>act(async()=>{const data=await call('retrieveScores',sessionKey);setRows(data);setStatus(data.length?'Current spreadsheet data':'No scores saved yet.');})},'Retrieve Spreadsheet Information'),
+      user?.role==='teacher'&&h('button',{disabled,onClick:update},'Update Spreadsheet'),
+      user?.role==='teacher'&&h('button',{disabled,onClick:()=>act(async()=>{const data=await call('retrieveScores',sessionKey);setRows(data);setStatus(data.length?'Current spreadsheet data':'No scores saved yet.');})},'Retrieve Spreadsheet Information'),
       h('p',{role:'status'},status),rows.length>0&&h('table',{'aria-label':'Current spreadsheet data'},h('tbody',null,rows.map((row,i)=>h('tr',{key:i},row.map((v,j)=>h(i?'td':'th',{key:j},v)))))))));
 }
 const root = ReactDOM.createRoot(document.getElementById('root'));

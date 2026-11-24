@@ -46,10 +46,11 @@ function microsoftConfig_() {
   return p;
 }
 
-function startSignIn() {
+function startSignIn(role) {
+  if (!['student', 'teacher'].includes(role)) throw new Error('Select Student or Teacher.');
   const p = microsoftConfig_();
   const state = Utilities.getUuid() + Utilities.getUuid();
-  CacheService.getUserCache().put('oauthState:' + state, 'pending', 600);
+  CacheService.getUserCache().put('oauthState:' + state, role, 600);
   const params = {client_id:p.MS_CLIENT_ID, response_type:'code', redirect_uri:ScriptApp.getService().getUrl(),
     scope:'https://graph.microsoft.com/User.Read', state:state, prompt:'login'};
   return 'https://login.microsoftonline.com/' + encodeURIComponent(p.MS_TENANT_ID) + '/oauth2/v2.0/authorize?' +
@@ -60,9 +61,11 @@ function finishSignIn_(query) {
   const cache = CacheService.getUserCache();
   const key = 'oauthState:' + query.state;
   const lock = LockService.getUserLock();
+  let role;
   lock.waitLock(5000);
   try {
-    if (!/^[a-f0-9-]{72}$/i.test(query.state || '') || cache.get(key) !== 'pending')
+    role = cache.get(key);
+    if (!/^[a-f0-9-]{72}$/i.test(query.state || '') || !['student', 'teacher'].includes(role))
       throw new Error('This sign-in link expired or was already used. Open the web app to start again.');
     cache.remove(key);
   } finally {
@@ -82,7 +85,7 @@ function finishSignIn_(query) {
     .find(value => demoAccounts_.includes(value));
   if (!email) throw new Error('Choose the personal Microsoft account or Bergen account registered for this private demo.');
   const sessionKey = Utilities.getUuid() + Utilities.getUuid();
-  cache.put('scorer:' + sessionKey, JSON.stringify({name:profile.displayName,email:email}), 3600);
+  cache.put('scorer:' + sessionKey, JSON.stringify({name:profile.displayName,email:email, role:role}), 3600);
   return sessionKey;
 }
 
@@ -91,13 +94,19 @@ function currentScorer(sessionKey) {
   return JSON.parse(CacheService.getUserCache().get('scorer:' + sessionKey) || 'null');
 }
 
-function scoringBook_(sessionKey) {
-  if (!currentScorer(sessionKey)) throw new Error('Sign in with Microsoft to access scores.');
+function logout(sessionKey) {
+  if (currentScorer(sessionKey)) CacheService.getUserCache().remove('scorer:' + sessionKey);
+}
+
+function scoringBook_(sessionKey, requiredRole) {
+  const scorer = currentScorer(sessionKey);
+  if (scorer && scorer.role !== requiredRole) throw new Error('This action is unavailable for your role.');
+  if (!scorer) throw new Error('Sign in with Microsoft to access scores.');
   return SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('DEMO_SHEET_ID'));
 }
 
 function updateScores(sessionKey, scores) {
-  const book = scoringBook_(sessionKey);
+  const book = scoringBook_(sessionKey, 'teacher');
   if (!Array.isArray(scores) || scores.length !== 3 || !scores.every(Number.isFinite)) throw new Error('Enter three numerical scores.');
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -109,6 +118,14 @@ function updateScores(sessionKey, scores) {
 }
 
 function retrieveScores(sessionKey) {
-  const sheet = scoringBook_(sessionKey).getSheetByName('Audition Scores');
+  const sheet = scoringBook_(sessionKey, 'teacher').getSheetByName('Audition Scores');
   return sheet ? sheet.getRange('A1:D2').getDisplayValues() : [];
+}
+
+function retrieveTotal(sessionKey) {
+  const sheet = scoringBook_(sessionKey, 'student').getSheetByName('Audition Scores');
+  if (!sheet) return null;
+  const scores = sheet.getRange('B2:D2').getValues()[0];
+  if (!scores.every(Number.isFinite)) return null;
+  return scores.reduce((total, score) => total + score, 0);
 }
