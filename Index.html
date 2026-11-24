@@ -6,7 +6,7 @@ main { min-height: 80vh; display: grid; place-items: center; text-align: center;
 table { margin: 1em auto; }
 input { width: min(5em, 15vw); }
 button + button { margin-left: .4em; }
-</style></head><body><div id="root"></div>
+</style></head><body><div id="root" data-session="<?= sessionKey ?>" data-error="<?= signInError ?>"></div>
 <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script>
@@ -14,11 +14,12 @@ const h=React.createElement, labels=['Instrument','Tone','Pitch','Rhythm'];
 function call(name,...args){
   return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[name](...args));
 }
+let sessionKey = document.getElementById('root').dataset.session;
 function App(){
   const [user,setUser]=React.useState(null), [scores,setScores]=React.useState(['','','']);
-  const [rows,setRows]=React.useState([]), [status,setStatus]=React.useState(''), [busy,setBusy]=React.useState(false);
+  const [rows,setRows]=React.useState([]), [status,setStatus]=React.useState(document.getElementById('root').dataset.error), [busy,setBusy]=React.useState(false);
   const [url,setUrl]=React.useState('');
-  React.useEffect(()=>{call('currentScorer').then(setUser).catch(e=>setStatus(e.message));},[]);
+  React.useEffect(()=>{if(sessionKey) call('currentScorer',sessionKey).then(setUser).catch(e=>setStatus(e.message));},[]);
   async function act(task){
     setBusy(true);setStatus('');
     try{await task();}catch(e){setStatus(e.message);}finally{setBusy(false);}
@@ -26,7 +27,7 @@ function App(){
   const disabled=!user||busy;
   function update(){
     if(scores.some(x=>x.trim()===''||!Number.isFinite(Number(x)))){setStatus('Enter a number for each score.');return;}
-    act(async()=>{await call('updateScores',scores.map(Number));setRows([]);setStatus('Saved to the Audition Scores tab.');});
+    act(async()=>{await call('updateScores',sessionKey,scores.map(Number));setRows([]);setStatus('Saved to the Audition Scores tab.');});
   }
   return h(React.Fragment,null,
     user && h('p',{className:'account'},user.name,' (',user.email,')'),
@@ -35,12 +36,18 @@ function App(){
       h('table',null,h('thead',null,h('tr',null,labels.map(x=>h('th',{key:x,scope:'col'},x)))),
       h('tbody',null,h('tr',null,h('th',{scope:'row'},'Flute'),scores.map((x,i)=>h('td',{key:i},h('input',{type:'number',step:'any','aria-label':labels[i+1],value:x,disabled,onChange:e=>setScores(scores.map((v,j)=>i===j?e.target.value:v))})))))),
       h('button',{disabled,onClick:update},'Update Spreadsheet'),
-      h('button',{disabled,onClick:()=>act(async()=>{const data=await call('retrieveScores');setRows(data);setStatus(data.length?'Current spreadsheet data':'No scores saved yet.');})},'Retrieve Spreadsheet Information'),
+      h('button',{disabled,onClick:()=>act(async()=>{const data=await call('retrieveScores',sessionKey);setRows(data);setStatus(data.length?'Current spreadsheet data':'No scores saved yet.');})},'Retrieve Spreadsheet Information'),
       h('p',{role:'status'},status),rows.length>0&&h('table',{'aria-label':'Current spreadsheet data'},h('tbody',null,rows.map((row,i)=>h('tr',{key:i},row.map((v,j)=>h(i?'td':'th',{key:j},v)))))))));
 }
 const root = ReactDOM.createRoot(document.getElementById('root'));
 if (window.google?.script?.run) {
   root.render(h(App));
+  window.addEventListener('pageshow', event => {
+    if (event.persisted) {
+      sessionKey = '';
+      root.render(h(App, {key: Date.now()}));
+    }
+  });
 } else {
   root.render(h('main', null, h('section', null,
     h('h1', null, 'Audition scoring'),

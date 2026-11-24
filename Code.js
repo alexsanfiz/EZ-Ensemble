@@ -1,6 +1,15 @@
 function doGet(e) {
-  if (e && e.parameter && (e.parameter.code || e.parameter.error)) finishSignIn_(e.parameter);
-  return HtmlService.createHtmlOutputFromFile("Index").setTitle("EZ-Ensemble");
+  const page = HtmlService.createTemplateFromFile("Index");
+  page.sessionKey = "";
+  page.signInError = "";
+  if (e && e.parameter && (e.parameter.code || e.parameter.error)) {
+    try {
+      page.sessionKey = finishSignIn_(e.parameter);
+    } catch (error) {
+      page.signInError = "Sign-in did not complete. Please sign in again.";
+    }
+  }
+  return page.evaluate().setTitle("EZ-Ensemble");
 }
 
 // Run once from the editor so the demo sheet belongs to the project owner.
@@ -42,7 +51,7 @@ function startSignIn() {
   const state = Utilities.getUuid() + Utilities.getUuid();
   CacheService.getUserCache().put('oauthState:' + state, 'pending', 600);
   const params = {client_id:p.MS_CLIENT_ID, response_type:'code', redirect_uri:ScriptApp.getService().getUrl(),
-    scope:'https://graph.microsoft.com/User.Read', state:state, prompt:'select_account'};
+    scope:'https://graph.microsoft.com/User.Read', state:state, prompt:'login'};
   return 'https://login.microsoftonline.com/' + encodeURIComponent(p.MS_TENANT_ID) + '/oauth2/v2.0/authorize?' +
     Object.entries(params).map(([k,v]) => k + '=' + encodeURIComponent(v)).join('&');
 }
@@ -72,20 +81,23 @@ function finishSignIn_(query) {
     .map(value => value.toLowerCase())
     .find(value => demoAccounts_.includes(value));
   if (!email) throw new Error('Choose the personal Microsoft account or Bergen account registered for this private demo.');
-  cache.put('scorer', JSON.stringify({name:profile.displayName,email:email}), 3600);
+  const sessionKey = Utilities.getUuid() + Utilities.getUuid();
+  cache.put('scorer:' + sessionKey, JSON.stringify({name:profile.displayName,email:email}), 3600);
+  return sessionKey;
 }
 
-function currentScorer() {
-  return JSON.parse(CacheService.getUserCache().get('scorer') || 'null');
+function currentScorer(sessionKey) {
+  if (!/^[a-f0-9-]{72}$/i.test(sessionKey || '')) return null;
+  return JSON.parse(CacheService.getUserCache().get('scorer:' + sessionKey) || 'null');
 }
 
-function scoringBook_() {
-  if (!currentScorer()) throw new Error('Sign in with Microsoft to access scores.');
+function scoringBook_(sessionKey) {
+  if (!currentScorer(sessionKey)) throw new Error('Sign in with Microsoft to access scores.');
   return SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty('DEMO_SHEET_ID'));
 }
 
-function updateScores(scores) {
-  const book = scoringBook_();
+function updateScores(sessionKey, scores) {
+  const book = scoringBook_(sessionKey);
   if (!Array.isArray(scores) || scores.length !== 3 || !scores.every(Number.isFinite)) throw new Error('Enter three numerical scores.');
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -96,7 +108,7 @@ function updateScores(scores) {
   } finally { lock.releaseLock(); }
 }
 
-function retrieveScores() {
-  const sheet = scoringBook_().getSheetByName('Audition Scores');
+function retrieveScores(sessionKey) {
+  const sheet = scoringBook_(sessionKey).getSheetByName('Audition Scores');
   return sheet ? sheet.getRange('A1:D2').getDisplayValues() : [];
 }
